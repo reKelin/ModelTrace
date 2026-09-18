@@ -53,18 +53,16 @@
               <label><span>API 类型</span><select id="test-api-format"><option value="openai">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option></select></label>
               <label><span>请求头预设</span><select id="test-header-preset"><option value="default">默认（Codex Desktop）</option><option value="codex">Codex / OpenAI SDK</option><option value="claude-code">Claude Code / Anthropic SDK</option></select></label>
               <label><span>温度（可选）</span><input id="test-temperature" type="number" min="0" max="2" step="0.1" placeholder="接口默认"></label>
-              <label><span>最多尝试</span><input id="test-attempts" type="number" min="3" max="12" value="6"></label>
-              <label><span>并发数</span><input id="test-concurrency" type="number" min="1" max="6" value="3"></label>
             </div>
             <div id="test-orca-credential" class="orca-inline-credential">
               <span>OrcaRouter 凭据</span>
               <strong id="test-orca-credential-state">未配置</strong>
               <button class="button secondary" type="button" data-orca-connect-action data-orca-open-connect>接入 OrcaRouter</button>
             </div>
-            <div class="form-footer"><button class="button primary" type="submit" data-orca-submit>开始测试</button></div>
+            <div class="form-footer"><span>首批并发 3 次；失败自动补试，累计最多 10 次。每份有效回答返回后立即更新结果。</span><button class="button primary" type="submit" data-orca-submit>开始测试</button></div>
           </form>
           <section id="api-test-progress" class="progress-panel" hidden aria-live="polite">
-            <div class="progress-heading"><strong id="api-progress-status">准备测试</strong><span id="api-progress-count">有效 0/3 · 已尝试 0/6</span></div>
+            <div class="progress-heading"><strong id="api-progress-status">准备测试</strong><span id="api-progress-count">有效 0/3 · 已尝试 0/10</span></div>
             <div class="progress-track"><i id="api-progress-fill"></i></div>
             <div id="api-progress-steps" class="progress-steps"></div>
           </section>

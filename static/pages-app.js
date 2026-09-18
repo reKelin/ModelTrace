@@ -68,7 +68,7 @@ function regenerate() {
   renderChallenges();
 }
 
-function renderResult(payload) {
+function renderResult(payload, shouldScroll = true) {
   const diagnostics = payload.diagnostics.map((item, index) => `
     <span class="diagnostic ${item.accepted ? "accepted" : "rejected"}">挑战 ${index + 1}: ${item.parsed_numbers} 个数字 · ${item.accepted ? "计入" : "忽略"}</span>
   `).join("");
@@ -97,7 +97,7 @@ function renderResult(payload) {
     </div>
   `;
   result.hidden = false;
-  result.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (shouldScroll) result.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function analyze() {
@@ -139,8 +139,8 @@ async function testViaApi(event) {
   button.disabled = true;
   byId("result").hidden = true;
   setMessage("");
-  const maxAttempts = Math.min(12, Math.max(3, Number(byId("test-attempts").value) || 6));
-  const concurrency = Math.min(6, Math.max(1, Number(byId("test-concurrency").value) || 3));
+  const maxAttempts = 10;
+  const concurrency = 3;
   const target = 3;
   const challenges = generateChallenges(maxAttempts);
   const states = challenges.map(() => "pending");
@@ -158,30 +158,35 @@ async function testViaApi(event) {
 
   let nextIndex = 0;
   async function worker() {
-    while (outputs.length < target && nextIndex < challenges.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      states[index] = "working";
-      renderApiProgress(states, `并发 ${concurrency} · 当前已有 ${outputs.length}/${target} 份有效回答`);
-      try {
-        const text = await requestCompletion({ ...configuration, prompt: challenges[index].prompt });
-        const parsedNumbers = parseNumbers(text).length;
-        const minimumNumbers = Math.max(80, Math.ceil(challenges[index].expected_count * 0.55));
-        if (parsedNumbers >= minimumNumbers && outputs.length < target) {
-          outputs.push({ index, text, expected_count: challenges[index].expected_count });
-          states[index] = "done";
-        } else if (parsedNumbers >= minimumNumbers) {
-          states[index] = "unused";
-        } else {
-          errors.push(`尝试 ${index + 1}: 有效数字 ${parsedNumbers}/${minimumNumbers}`);
-          states[index] = "invalid";
-        }
-      } catch (error) {
-        errors.push(`尝试 ${index + 1}: ${error.message}`);
-        states[index] = "error";
+    if (outputs.length >= target || nextIndex >= challenges.length) return;
+    const index = nextIndex;
+    nextIndex += 1;
+    let shouldRetry = false;
+    states[index] = "working";
+    renderApiProgress(states, `并发 ${concurrency} · 当前已有 ${outputs.length}/${target} 份有效回答`);
+    try {
+      const text = await requestCompletion({ ...configuration, prompt: challenges[index].prompt });
+      const parsedNumbers = parseNumbers(text).length;
+      const minimumNumbers = Math.max(80, Math.ceil(challenges[index].expected_count * 0.55));
+      if (parsedNumbers >= minimumNumbers && outputs.length < target) {
+        outputs.push({ index, text, expected_count: challenges[index].expected_count });
+        states[index] = "done";
+        const currentOutputs = [...outputs].sort((left, right) => left.index - right.index);
+        renderResult(analyzeGlobalOutputs(currentOutputs, state.bank), currentOutputs.length === 1);
+      } else if (parsedNumbers >= minimumNumbers) {
+        states[index] = "unused";
+      } else {
+        errors.push(`尝试 ${index + 1}: 有效数字 ${parsedNumbers}/${minimumNumbers}`);
+        states[index] = "invalid";
+        shouldRetry = true;
       }
-      renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答`);
+    } catch (error) {
+      errors.push(`尝试 ${index + 1}: ${error.message}`);
+      states[index] = "error";
+      shouldRetry = true;
     }
+    renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答`);
+    if (shouldRetry) await worker();
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, challenges.length) }, () => worker()));
 
@@ -192,9 +197,7 @@ async function testViaApi(event) {
     button.disabled = false;
     return;
   }
-  outputs.sort((left, right) => left.index - right.index);
   renderApiProgress(states, `测试完成：${outputs.length}/${target} 份有效回答进入归因`);
-  renderResult(analyzeGlobalOutputs(outputs, state.bank));
   setMessage(errors.length ? `部分尝试未计入：${errors[0]}` : "", errors.length ? "error" : "success");
   button.disabled = false;
 }

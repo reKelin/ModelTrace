@@ -430,7 +430,7 @@ function renderChallenges() {
   });
 }
 
-function renderResult(payload) {
+function renderResult(payload, shouldScroll = true) {
   const diagnostics = payload.diagnostics.map((item, index) => `
     <span class="diagnostic ${item.accepted ? "accepted" : "rejected"}">挑战 ${index + 1}: ${item.parsed_numbers} 个数字 · ${item.accepted ? "计入" : "忽略"}</span>
   `).join("");
@@ -460,7 +460,7 @@ function renderResult(payload) {
     </div>
   `;
   byId("result").hidden = false;
-  byId("result").scrollIntoView({ behavior: "smooth", block: "start" });
+  if (shouldScroll) byId("result").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function analyzeManual() {
@@ -539,8 +539,8 @@ async function testViaApi(event) {
     return;
   }
 
-  const maxAttempts = Math.min(12, Math.max(3, Number(byId("test-attempts").value) || 6));
-  const concurrency = Math.min(6, Math.max(1, Number(byId("test-concurrency").value) || 3));
+  const maxAttempts = 10;
+  const concurrency = 3;
   const batches = await Promise.all(Array.from({ length: Math.ceil(maxAttempts / 3) }, async () => {
     const response = await fetch("/api/challenges");
     return (await response.json()).challenges;
@@ -557,36 +557,68 @@ async function testViaApi(event) {
   renderApiProgress(states, "已生成独立挑战，准备调用模型");
 
   let nextIndex = 0;
-  async function worker() {
-    while (outputs.length < target && nextIndex < challenges.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      states[index] = "working";
-      renderApiProgress(states, `并发 ${concurrency} · 当前已有 ${outputs.length}/${target} 份有效回答`);
+  let analysisError = "";
+  let analysisQueue = Promise.resolve();
+
+  function updateAnalysis() {
+    const currentOutputs = [...outputs].sort((left, right) => left.index - right.index);
+    const currentErrors = [...errors];
+    const attempted = states.filter((state) => ["done", "unused", "invalid", "error"].includes(state)).length;
+    analysisQueue = analysisQueue.then(async () => {
       try {
-        const response = await fetch("/api/test/probe", {
+        const response = await fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...configuration, prompt: challenges[index].prompt, expected_count: challenges[index].expected_count }),
+          body: JSON.stringify({ outputs: currentOutputs }),
         });
-        const payload = await response.json();
-        if (payload.credential) renderCredentialState(payload.credential);
-        if (!response.ok) throw new Error(payload.error || "接口请求失败");
-        if (payload.accepted && outputs.length < target) {
-          outputs.push({ index, text: payload.text, expected_count: challenges[index].expected_count });
-          states[index] = "done";
-        } else if (payload.accepted) {
-          states[index] = "unused";
-        } else {
-          errors.push(`尝试 ${index + 1}: 有效数字 ${payload.parsed_numbers}/${payload.minimum_numbers}`);
-          states[index] = "invalid";
-        }
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "API 自动测试失败。");
+        result.api_test = { requested: target, attempted, max_attempts: challenges.length, received: currentOutputs.length, errors: currentErrors };
+        analysisError = "";
+        renderResult(result, currentOutputs.length === 1);
       } catch (error) {
-        errors.push(`尝试 ${index + 1}: ${error.message}`);
-        states[index] = "error";
+        analysisError = error.message || "API 自动测试失败。";
+        setMessage(byId("test-message"), analysisError, "error");
       }
-      renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答`);
+    });
+    return analysisQueue;
+  }
+
+  async function worker() {
+    if (outputs.length >= target || nextIndex >= challenges.length) return;
+    const index = nextIndex;
+    nextIndex += 1;
+    let shouldRetry = false;
+    states[index] = "working";
+    renderApiProgress(states, `并发 ${concurrency} · 当前已有 ${outputs.length}/${target} 份有效回答`);
+    try {
+      const response = await fetch("/api/test/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...configuration, prompt: challenges[index].prompt, expected_count: challenges[index].expected_count }),
+      });
+      const payload = await response.json();
+      if (payload.credential) renderCredentialState(payload.credential);
+      if (!response.ok) throw new Error(payload.error || "接口请求失败");
+      if (payload.accepted && outputs.length < target) {
+        outputs.push({ index, text: payload.text, expected_count: challenges[index].expected_count });
+        states[index] = "done";
+        renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答，正在更新结果`);
+        await updateAnalysis();
+      } else if (payload.accepted) {
+        states[index] = "unused";
+      } else {
+        errors.push(`尝试 ${index + 1}: 有效数字 ${payload.parsed_numbers}/${payload.minimum_numbers}`);
+        states[index] = "invalid";
+        shouldRetry = true;
+      }
+    } catch (error) {
+      errors.push(`尝试 ${index + 1}: ${error.message}`);
+      states[index] = "error";
+      shouldRetry = true;
     }
+    renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答`);
+    if (shouldRetry) await worker();
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, challenges.length) }, () => worker()));
 
@@ -601,22 +633,10 @@ async function testViaApi(event) {
     return;
   }
 
-  outputs.sort((left, right) => left.index - right.index);
-  renderApiProgress(states, "模型回答已收齐，正在计算归因概率……");
-  const analysisResponse = await fetch("/api/analyze", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ outputs }),
-  });
-  const result = await analysisResponse.json();
-  if (analysisResponse.ok) {
-    const attempted = states.filter((state) => ["done", "invalid", "error"].includes(state)).length;
-    result.api_test = { requested: target, attempted, max_attempts: challenges.length, received: outputs.length, errors };
-    renderApiProgress(states, `测试完成：${outputs.length}/${target} 份有效回答进入归因`);
-    renderResult(result);
-  } else {
-    setMessage(byId("test-message"), result.error || "API 自动测试失败。", "error");
-  }
+  await analysisQueue;
+  renderApiProgress(states, `测试完成：${outputs.length}/${target} 份有效回答进入归因`);
+  if (analysisError) setMessage(byId("test-message"), analysisError, "error");
+  else setMessage(byId("test-message"), errors.length ? `部分尝试未计入：${errors[0]}` : "", errors.length ? "error" : "success");
   button.disabled = false;
 }
 
@@ -774,7 +794,7 @@ byId("regenerate").addEventListener("click", loadChallenges);
 byId("analyze").addEventListener("click", analyzeManual);
 byId("api-test-form").addEventListener("submit", testViaApi);
 byId("load-custom-models").addEventListener("click", loadCustomModels);
-byId("custom-channel-model-select").addEventListener("change", (event) => {
+byId("custom-channel-model-select")?.addEventListener("change", (event) => {
   const form = state.providerForms.find((item) => item.root.id === "api-test-form");
   if (event.target.value) form.customModel.value = event.target.value;
   else {
