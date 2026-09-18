@@ -552,7 +552,7 @@ async function testViaApi(event) {
     return;
   }
 
-  const maxAttempts = 8;
+  const maxAttempts = 6;
   const concurrency = 3;
   const batches = await Promise.all(Array.from({ length: Math.ceil(maxAttempts / 3) }, async () => {
     const response = await fetch("/api/challenges");

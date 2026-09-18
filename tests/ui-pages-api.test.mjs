@@ -22,7 +22,7 @@ test("automatic testing has a fixed retry budget and updates every valid result"
   ]);
   assert.doesNotMatch(html, /test-attempts|test-concurrency/);
   assert.match(html, /已尝试 0\/3/);
-  assert.match(app, /const maxAttempts = 8;/);
+  assert.match(app, /const maxAttempts = 6;/);
   assert.match(app, /const concurrency = 3;/);
   assert.match(app, /index < concurrency \? "pending" : "hidden"/);
   assert.match(app, /states\.filter\(\(state\) => state !== "hidden"\)/);

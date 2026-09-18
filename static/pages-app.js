@@ -152,7 +152,7 @@ async function testViaApi(event) {
   button.disabled = true;
   byId("result").hidden = true;
   setMessage("");
-  const maxAttempts = 8;
+  const maxAttempts = 6;
   const concurrency = 3;
   const target = 3;
   const challenges = generateChallenges(maxAttempts);
