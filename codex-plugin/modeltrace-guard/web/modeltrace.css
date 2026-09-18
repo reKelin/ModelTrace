@@ -114,8 +114,9 @@ label code { color: var(--primary-dark); }
 .progress-heading span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .progress-track { height: 6px; overflow: hidden; border-radius: 999px; background: #e3e7eb; }
 .progress-track i { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--primary); transition: width .2s ease; }
-.progress-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 11px; }
-.progress-step { display: flex; align-items: center; gap: 7px; padding: 7px 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); font-size: 11px; }
+.progress-steps { display: flex; flex-wrap: nowrap; gap: 8px; margin-top: 11px; overflow: hidden; }
+.progress-step { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; min-width: 0; padding: 7px 9px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); font-size: 11px; transition: flex-basis .25s ease, color .2s ease, border-color .2s ease, background-color .2s ease; animation: progress-step-in .25s ease both; }
+.progress-step > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .progress-step b { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; background: #e3e7eb; font-size: 10px; }
 .progress-step.working { color: var(--primary-dark); border-color: #a9c4f5; background: #eef4ff; }
 .progress-step.working b, .progress-step.done b { color: white; background: var(--primary); }
@@ -125,6 +126,11 @@ label code { color: var(--primary-dark); }
 .progress-step.error { color: var(--danger); border-color: #f3c7c2; background: var(--danger-soft); }
 .progress-step.error b { color: white; background: var(--danger); }
 .progress-step.skipped { opacity: .55; }
+@keyframes progress-step-in { from { opacity: 0; transform: translateX(10px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-step { transition: none; animation: none; }
+}
 
 .message { margin-top: 14px; padding: 11px 13px; border: 1px solid; border-radius: 7px; font-size: 12px; }
 .message.error { color: var(--danger); background: var(--danger-soft); border-color: #f3c7c2; }

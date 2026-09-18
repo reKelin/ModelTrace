@@ -121,16 +121,29 @@ async function analyze() {
 }
 
 function renderApiProgress(states, status) {
-  const valid = states.filter((value) => value === "done").length;
-  const attempted = states.filter((value) => ["done", "unused", "invalid", "error"].includes(value)).length;
+  const visibleStates = states.filter((state) => state !== "hidden");
+  const valid = visibleStates.filter((state) => state === "done").length;
+  const attempted = visibleStates.filter((state) => ["done", "unused", "invalid", "error"].includes(state)).length;
   byId("api-test-progress").hidden = false;
   byId("api-progress-status").textContent = status;
-  byId("api-progress-count").textContent = `有效 ${valid}/3 · 已尝试 ${attempted}/${states.length}`;
+  byId("api-progress-count").textContent = `有效 ${valid}/3 · 已尝试 ${attempted}/${visibleStates.length}`;
   byId("api-progress-fill").style.width = `${(valid / 3) * 100}%`;
-  byId("api-progress-steps").innerHTML = states.map((value, index) => {
-    const labels = { pending: "等待", working: "请求中", done: "有效", unused: "未采用", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
-    return `<span class="progress-step ${value}"><b>${index + 1}</b>挑战 ${index + 1} · ${labels[value]}</span>`;
-  }).join("");
+  const steps = byId("api-progress-steps");
+  const basis = `calc((100% - ${(visibleStates.length - 1) * 8}px) / ${visibleStates.length})`;
+  const labels = { pending: "等待", working: "请求中", done: "有效", unused: "未采用", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
+  visibleStates.forEach((state, index) => {
+    let step = steps.children[index];
+    if (!step) {
+      step = document.createElement("span");
+      step.innerHTML = "<b></b><span></span>";
+      steps.append(step);
+    }
+    step.className = `progress-step ${state}`;
+    step.style.flexBasis = basis;
+    step.querySelector("b").textContent = index + 1;
+    step.lastElementChild.textContent = `挑战 ${index + 1} · ${labels[state]}`;
+  });
+  while (steps.children.length > visibleStates.length) steps.lastElementChild.remove();
 }
 
 async function testViaApi(event) {
@@ -139,11 +152,11 @@ async function testViaApi(event) {
   button.disabled = true;
   byId("result").hidden = true;
   setMessage("");
-  const maxAttempts = 10;
+  const maxAttempts = 6;
   const concurrency = 3;
   const target = 3;
   const challenges = generateChallenges(maxAttempts);
-  const states = challenges.map(() => "pending");
+  const states = challenges.map((_, index) => index < concurrency ? "pending" : "hidden");
   const outputs = [];
   const errors = [];
   const temperatureValue = byId("test-temperature").value.trim();

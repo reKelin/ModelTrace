@@ -484,17 +484,30 @@ async function analyzeManual() {
 }
 
 function renderApiProgress(states, status) {
-  const valid = states.filter((state) => state === "done").length;
-  const attempted = states.filter((state) => ["done", "unused", "invalid", "error"].includes(state)).length;
+  const visibleStates = states.filter((state) => state !== "hidden");
+  const valid = visibleStates.filter((state) => state === "done").length;
+  const attempted = visibleStates.filter((state) => ["done", "unused", "invalid", "error"].includes(state)).length;
   const target = 3;
   byId("api-test-progress").hidden = false;
   byId("api-progress-status").textContent = status;
-  byId("api-progress-count").textContent = `有效 ${valid}/${target} · 已尝试 ${attempted}/${states.length}`;
+  byId("api-progress-count").textContent = `有效 ${valid}/${target} · 已尝试 ${attempted}/${visibleStates.length}`;
   byId("api-progress-fill").style.width = `${(valid / target) * 100}%`;
-  byId("api-progress-steps").innerHTML = states.map((state, index) => {
-    const labels = { pending: "等待", working: "请求中", done: "有效", unused: "未采用", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
-    return `<span class="progress-step ${state}"><b>${index + 1}</b>挑战 ${index + 1} · ${labels[state]}</span>`;
-  }).join("");
+  const steps = byId("api-progress-steps");
+  const basis = `calc((100% - ${(visibleStates.length - 1) * 8}px) / ${visibleStates.length})`;
+  const labels = { pending: "等待", working: "请求中", done: "有效", unused: "未采用", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
+  visibleStates.forEach((state, index) => {
+    let step = steps.children[index];
+    if (!step) {
+      step = document.createElement("span");
+      step.innerHTML = "<b></b><span></span>";
+      steps.append(step);
+    }
+    step.className = `progress-step ${state}`;
+    step.style.flexBasis = basis;
+    step.querySelector("b").textContent = index + 1;
+    step.lastElementChild.textContent = `挑战 ${index + 1} · ${labels[state]}`;
+  });
+  while (steps.children.length > visibleStates.length) steps.lastElementChild.remove();
 }
 
 async function loadCustomModels() {
@@ -539,14 +552,14 @@ async function testViaApi(event) {
     return;
   }
 
-  const maxAttempts = 10;
+  const maxAttempts = 6;
   const concurrency = 3;
   const batches = await Promise.all(Array.from({ length: Math.ceil(maxAttempts / 3) }, async () => {
     const response = await fetch("/api/challenges");
     return (await response.json()).challenges;
   }));
   const challenges = batches.flat().slice(0, maxAttempts);
-  const states = challenges.map(() => "pending");
+  const states = challenges.map((_, index) => index < concurrency ? "pending" : "hidden");
   const outputs = [];
   const errors = [];
   const target = 3;

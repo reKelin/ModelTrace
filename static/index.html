@@ -50,12 +50,12 @@
             <label><span>温度（可选）</span><input id="test-temperature" type="number" min="0" max="2" step="0.1" placeholder="接口默认"></label>
           </div>
           <div class="form-footer">
-            <span>首批并发 3 次；失败自动补试，累计最多 10 次。每份有效回答返回后立即更新结果。Key 只在当前浏览器内存中使用；接口须允许 CORS。浏览器不能伪装 User-Agent，受限渠道请用本地版。</span>
+            <span>首批并发 3 次；每次失败增加 1 次补试，累计最多 6 次。每份有效回答返回后立即更新结果。Key 只在当前浏览器内存中使用；接口须允许 CORS。浏览器不能伪装 User-Agent，受限渠道请用本地版。</span>
             <button class="button primary" type="submit">开始测试</button>
           </div>
         </form>
         <section id="api-test-progress" class="progress-panel" hidden aria-live="polite">
-          <div class="progress-heading"><strong id="api-progress-status">准备测试</strong><span id="api-progress-count">有效 0/3 · 已尝试 0/10</span></div>
+          <div class="progress-heading"><strong id="api-progress-status">准备测试</strong><span id="api-progress-count">有效 0/3 · 已尝试 0/3</span></div>
           <div class="progress-track"><i id="api-progress-fill"></i></div>
           <div id="api-progress-steps" class="progress-steps"></div>
         </section>
