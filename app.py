@@ -15,6 +15,7 @@ import orcarouter
 from enrollment import (
     bank_summary,
     enroll_automatic,
+    fetch_models,
     request_completion,
     resolve_orcarouter_credential,
     test_automatic,
@@ -226,6 +227,20 @@ def requested_temperature(payload: dict) -> float | None:
     return None if value in (None, "") else float(value)
 
 
+def requested_api_format(payload: dict) -> str:
+    value = str(payload.get("api_format") or "auto")
+    if value not in {"auto", "openai", "openai-responses", "anthropic"}:
+        raise ValueError(f"未知 API 类型：{value}")
+    return value
+
+
+def requested_header_preset(payload: dict) -> str:
+    value = str(payload.get("header_preset") or "default")
+    if value not in {"default", "codex", "claude-code"}:
+        raise ValueError(f"未知请求头预设：{value}")
+    return value
+
+
 def summarized_bank(bank_id: str) -> dict:
     config = BANK_CONFIGS[bank_id]
     bank = banks.get(bank_id)
@@ -299,15 +314,37 @@ def automatic_test():
             api_model=context["model"],
             temperature=requested_temperature(payload),
             bank=unified_bank,
-            api_format="auto",
+            api_format=requested_api_format(payload),
             provider_id=context["provider_id"],
             credential=context["credential"],
+            header_preset=requested_header_preset(payload),
         )
         result["bank"] = summarized_unified_bank()
         result["credential"] = credential_state()
         return jsonify(result)
     except (ValueError, orcarouter.OrcaRouterError) as error:
         return jsonify({"error": str(error)}), 400
+
+
+@app.post("/api/models")
+def custom_models():
+    payload = request.get_json()
+    try:
+        base_url = str(payload.get("base_url") or "").strip()
+        if not base_url:
+            raise ValueError("请填写 Base URL")
+        api_format = requested_api_format(payload)
+        models = fetch_models(
+            base_url,
+            str(payload.get("api_key") or ""),
+            "openai" if api_format == "auto" else api_format,
+            requested_header_preset(payload),
+        )
+        return jsonify({"models": models})
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:  # noqa: BLE001 - upstream failures are reported as-is
+        return jsonify({"error": orcarouter.redact(str(error))}), 502
 
 
 @app.post("/api/test/probe")
@@ -321,9 +358,10 @@ def automatic_test_probe():
             api_model=context["model"],
             prompt=payload["prompt"],
             temperature=requested_temperature(payload),
-            api_format="auto",
+            api_format=requested_api_format(payload),
             provider_id=context["provider_id"],
             credential=context["credential"],
+            header_preset=requested_header_preset(payload),
         )
         expected_count = int(payload["expected_count"])
         parsed_numbers = len(parse_numbers(text))
@@ -399,13 +437,14 @@ def automatic_enrollment():
             model_label=payload["model_label"].strip(),
             sample_count=int(payload.get("sample_count", 36)),
             temperature=requested_temperature(payload),
-            api_format="auto",
+            api_format=requested_api_format(payload),
             data_file=config["data_file"],
             bank_file=config["bank_file"],
             bank_id=bank_id,
             provider="api",
             provider_id=context["provider_id"],
             credential=context["credential"],
+            header_preset=requested_header_preset(payload),
         )
         replace_bank(bank_id)
         result["bank"] = summarized_bank(bank_id)

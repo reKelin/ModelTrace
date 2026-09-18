@@ -32,6 +32,21 @@ DEFAULT_UPSTREAM_USER_AGENT = (
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
 MAX_ATTEMPTS = 3
 RETRY_BASE_DELAY = 1.0
+HEADER_PRESETS = {
+    "default": {},
+    "codex": {
+        "User-Agent": "OpenAI/JS 6.45.0",
+        "x-stainless-lang": "js",
+        "x-stainless-package-version": "6.45.0",
+        "x-stainless-runtime": "node",
+    },
+    "claude-code": {
+        "User-Agent": "Anthropic/JS 0.109.0",
+        "x-stainless-lang": "js",
+        "x-stainless-package-version": "0.109.0",
+        "x-stainless-runtime": "node",
+    },
+}
 
 
 def upstream_user_agent() -> str:
@@ -41,6 +56,21 @@ def upstream_user_agent() -> str:
         or ""
     ).strip()
     return override or DEFAULT_UPSTREAM_USER_AGENT
+
+
+def request_headers(api_key: str, api_format: str, header_preset: str = "default") -> dict[str, str]:
+    if header_preset not in HEADER_PRESETS:
+        raise ValueError(f"未知请求头预设：{header_preset}")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": upstream_user_agent(),
+        **HEADER_PRESETS[header_preset],
+    }
+    if api_format == "anthropic":
+        headers.update({"x-api-key": api_key, "anthropic-version": "2023-06-01"})
+    return headers
 
 
 def bank_summary(bank: dict) -> dict:
@@ -163,11 +193,51 @@ def completion_url(base_url: str, api_format: str = "openai") -> str:
         if normalized.endswith("/v1"):
             return normalized + "/messages"
         return normalized + "/v1/messages"
+    if api_format == "openai-responses":
+        if normalized.endswith("/responses"):
+            return normalized
+        if normalized.endswith("/v1"):
+            return normalized + "/responses"
+        return normalized + "/v1/responses"
     if normalized.endswith("/chat/completions"):
         return normalized
     if normalized.endswith("/v1"):
         return normalized + "/chat/completions"
     return normalized + "/v1/chat/completions"
+
+
+def models_url(base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    normalized = re.sub(r"/(?:chat/completions|responses|messages|models)$", "", normalized)
+    return normalized + "/models" if normalized.endswith("/v1") else normalized + "/v1/models"
+
+
+def fetch_models(
+    base_url: str,
+    api_key: str,
+    api_format: str = "openai",
+    header_preset: str = "default",
+) -> list[str]:
+    url = models_url(base_url)
+    request = urllib.request.Request(
+        url,
+        headers=request_headers(api_key, api_format, header_preset),
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        details = error.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"HTTP {error.code}: {_compact_upstream_error(details, error.reason)}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"无法连接模型目录：{getattr(error, 'reason', str(error))}") from error
+    rows = payload.get("data") if isinstance(payload.get("data"), list) else payload.get("models", [])
+    model_ids = [row if isinstance(row, str) else row.get("id") for row in rows if row]
+    models = sorted({model for model in model_ids if model})
+    if not models:
+        raise RuntimeError("接口没有返回可选模型")
+    return models
 
 
 def resolve_provider(provider_id: str, environ: dict[str, str] | None = None) -> dict:
@@ -245,6 +315,7 @@ def _request_completion(
     system_prompt: str = "",
     provider_id: str = orcarouter.CUSTOM_PROVIDER_ID,
     credential: orcarouter.Credential | None = None,
+    header_preset: str = "default",
 ) -> str:
     target = resolve_provider(provider_id)
     if target["base_url"]:
@@ -257,14 +328,12 @@ def _request_completion(
         }
         if system_prompt:
             body_data["system"] = system_prompt
-        headers = {
-            "x-api-key": api_key,
-            "Authorization": f"Bearer {api_key}",
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": upstream_user_agent(),
-        }
+        headers = request_headers(api_key, api_format, header_preset)
+    elif api_format == "openai-responses":
+        body_data = {"model": api_model, "input": prompt, "max_output_tokens": 4096}
+        if system_prompt:
+            body_data["instructions"] = system_prompt
+        headers = request_headers(api_key, api_format, header_preset)
     else:
         body_data = {
             "model": api_model,
@@ -273,12 +342,7 @@ def _request_completion(
                 {"role": "user", "content": prompt},
             ],
         }
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": upstream_user_agent(),
-        }
+        headers = request_headers(api_key, api_format, header_preset)
     if temperature is not None:
         body_data["temperature"] = temperature
     body = json.dumps(body_data).encode("utf-8")
@@ -323,6 +387,18 @@ def _request_completion(
             raise RuntimeError("模型拒绝生成，本次回答不计入")
         if stop_reason == "max_tokens":
             raise RuntimeError("回答因 max_tokens 截断，本次回答不计入")
+    elif api_format == "openai-responses":
+        if payload.get("status") == "incomplete":
+            reason = (payload.get("incomplete_details") or {}).get("reason", "incomplete")
+            raise RuntimeError(f"回答未正常完成（{reason}），本次回答不计入")
+        content = payload.get("output_text") or "".join(
+            part.get("text", "")
+            for item in payload.get("output", [])
+            for part in item.get("content", [])
+            if part.get("type") in {"output_text", "text"}
+        )
+        if not content:
+            raise RuntimeError("接口响应中没有文本内容")
     else:
         choice = payload["choices"][0]
         content = choice["message"]["content"]
@@ -343,6 +419,7 @@ def request_completion(
     system_prompt: str = "",
     provider_id: str = orcarouter.CUSTOM_PROVIDER_ID,
     credential: orcarouter.Credential | None = None,
+    header_preset: str = "default",
 ) -> str:
     if api_format != "auto":
         return _request_completion(
@@ -355,6 +432,7 @@ def request_completion(
             system_prompt,
             provider_id,
             credential,
+            header_preset,
         )
     formats = ("openai", "anthropic")
     errors = []
@@ -370,6 +448,7 @@ def request_completion(
                 system_prompt,
                 provider_id,
                 credential,
+                header_preset,
             )
         except orcarouter.CredentialRejected:
             # A revoked credential is rejected by every wire format: retrying the
@@ -389,6 +468,7 @@ def test_automatic(
     api_format: str = "openai",
     provider_id: str = orcarouter.CUSTOM_PROVIDER_ID,
     credential: orcarouter.Credential | None = None,
+    header_preset: str = "default",
 ) -> dict:
     target_count = 3
     max_attempts = 6
@@ -406,6 +486,7 @@ def test_automatic(
                 api_format,
                 provider_id=provider_id,
                 credential=credential,
+                header_preset=header_preset,
             )
             minimum = max(80, math.ceil(challenge["expected_count"] * 0.55))
             parsed_count = len(parse_numbers(text))
@@ -447,6 +528,7 @@ def enroll_automatic(
     provider: str = "api",
     provider_id: str = orcarouter.CUSTOM_PROVIDER_ID,
     credential: orcarouter.Credential | None = None,
+    header_preset: str = "default",
 ) -> dict:
     suite = fingerprint_suite()
     if sample_count < 3 or sample_count > len(suite):
@@ -474,6 +556,7 @@ def enroll_automatic(
                     system_prompt,
                     provider_id,
                     credential,
+                    header_preset,
                 )
                 row = make_row(
                     model_label=model_label,

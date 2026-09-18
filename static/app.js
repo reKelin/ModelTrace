@@ -295,13 +295,21 @@ function requestContext(form) {
   const providerId = form.providerId;
   const model = selectedModel(form);
   if (OrcaProvider.isOrcaRouter(providerId)) {
-    return { provider_id: providerId, api_model: model, base_url: "" };
+    return {
+      provider_id: providerId,
+      api_model: model,
+      base_url: "",
+      api_format: byId("test-api-format")?.value || "openai",
+      header_preset: byId("test-header-preset")?.value || "default",
+    };
   }
   return {
     provider_id: providerId,
     api_model: model,
     base_url: (form.root.querySelector("#test-api-base, #api-base") || {}).value || "",
     api_key: (form.root.querySelector("#test-api-key, #api-key") || {}).value || "",
+    api_format: (form.root.querySelector("#test-api-format") || {}).value || "auto",
+    header_preset: (form.root.querySelector("#test-header-preset") || {}).value || "default",
   };
 }
 
@@ -477,16 +485,39 @@ async function analyzeManual() {
 
 function renderApiProgress(states, status) {
   const valid = states.filter((state) => state === "done").length;
-  const attempted = states.filter((state) => ["done", "invalid", "error"].includes(state)).length;
+  const attempted = states.filter((state) => ["done", "unused", "invalid", "error"].includes(state)).length;
   const target = 3;
   byId("api-test-progress").hidden = false;
   byId("api-progress-status").textContent = status;
   byId("api-progress-count").textContent = `有效 ${valid}/${target} · 已尝试 ${attempted}/${states.length}`;
   byId("api-progress-fill").style.width = `${(valid / target) * 100}%`;
   byId("api-progress-steps").innerHTML = states.map((state, index) => {
-    const labels = { pending: "等待", working: "请求中", done: "有效", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
+    const labels = { pending: "等待", working: "请求中", done: "有效", unused: "未采用", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
     return `<span class="progress-step ${state}"><b>${index + 1}</b>挑战 ${index + 1} · ${labels[state]}</span>`;
   }).join("");
+}
+
+async function loadCustomModels() {
+  const form = state.providerForms.find((item) => item.root.id === "api-test-form");
+  const button = byId("load-custom-models");
+  button.disabled = true;
+  setMessage(byId("test-message"), "正在通过本地服务读取渠道模型目录……", "working");
+  try {
+    const response = await fetch("/api/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestContext(form)),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "模型目录加载失败");
+    byId("custom-channel-models").innerHTML = payload.models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
+    if (!payload.models.includes(form.customModel.value.trim())) form.customModel.value = payload.models[0];
+    setMessage(byId("test-message"), `已加载 ${payload.models.length} 个模型，并选中 ${form.customModel.value}。`, "success");
+  } catch (error) {
+    setMessage(byId("test-message"), error.message || "模型目录加载失败。", "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function testViaApi(event) {
@@ -503,10 +534,13 @@ async function testViaApi(event) {
     return;
   }
 
-  const challengeResponse = await fetch("/api/challenges");
-  const firstBatch = (await challengeResponse.json()).challenges;
-  const retryResponse = await fetch("/api/challenges");
-  const challenges = firstBatch.concat((await retryResponse.json()).challenges);
+  const maxAttempts = Math.min(12, Math.max(3, Number(byId("test-attempts").value) || 6));
+  const concurrency = Math.min(6, Math.max(1, Number(byId("test-concurrency").value) || 3));
+  const batches = await Promise.all(Array.from({ length: Math.ceil(maxAttempts / 3) }, async () => {
+    const response = await fetch("/api/challenges");
+    return (await response.json()).challenges;
+  }));
+  const challenges = batches.flat().slice(0, maxAttempts);
   const states = challenges.map(() => "pending");
   const outputs = [];
   const errors = [];
@@ -517,47 +551,52 @@ async function testViaApi(event) {
   };
   renderApiProgress(states, "已生成独立挑战，准备调用模型");
 
-  for (let index = 0; index < challenges.length && outputs.length < target; index += 1) {
-    states[index] = "working";
-    renderApiProgress(states, `正在进行第 ${index + 1} 次尝试，等待模型完整输出……`);
-    try {
-      const response = await fetch("/api/test/probe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...configuration,
-          prompt: challenges[index].prompt,
-          expected_count: challenges[index].expected_count,
-        }),
-      });
-      const payload = await response.json();
-      if (payload.credential) renderCredentialState(payload.credential);
-      if (!response.ok) throw new Error(payload.error || "接口请求失败");
-      if (payload.accepted) {
-        outputs.push({ text: payload.text, expected_count: challenges[index].expected_count });
-        states[index] = "done";
-      } else {
-        errors.push(`尝试 ${index + 1}: 有效数字 ${payload.parsed_numbers}/${payload.minimum_numbers}`);
-        states[index] = "invalid";
+  let nextIndex = 0;
+  async function worker() {
+    while (outputs.length < target && nextIndex < challenges.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      states[index] = "working";
+      renderApiProgress(states, `并发 ${concurrency} · 当前已有 ${outputs.length}/${target} 份有效回答`);
+      try {
+        const response = await fetch("/api/test/probe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...configuration, prompt: challenges[index].prompt, expected_count: challenges[index].expected_count }),
+        });
+        const payload = await response.json();
+        if (payload.credential) renderCredentialState(payload.credential);
+        if (!response.ok) throw new Error(payload.error || "接口请求失败");
+        if (payload.accepted && outputs.length < target) {
+          outputs.push({ index, text: payload.text, expected_count: challenges[index].expected_count });
+          states[index] = "done";
+        } else if (payload.accepted) {
+          states[index] = "unused";
+        } else {
+          errors.push(`尝试 ${index + 1}: 有效数字 ${payload.parsed_numbers}/${payload.minimum_numbers}`);
+          states[index] = "invalid";
+        }
+      } catch (error) {
+        errors.push(`尝试 ${index + 1}: ${error.message}`);
+        states[index] = "error";
       }
-    } catch (error) {
-      errors.push(`尝试 ${index + 1}: ${error.message}`);
-      states[index] = "error";
+      renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答`);
     }
-    renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答`);
   }
+  await Promise.all(Array.from({ length: Math.min(concurrency, challenges.length) }, () => worker()));
 
   if (outputs.length === target) {
     states.forEach((state, index) => { if (state === "pending") states[index] = "skipped"; });
   }
 
   if (!outputs.length) {
-    renderApiProgress(states, "六次尝试后仍没有可用回答");
+    renderApiProgress(states, `${maxAttempts} 次尝试后仍没有可用回答`);
     setMessage(byId("test-message"), `没有获得可分析输出。${errors[0] || ""}`, "error");
     button.disabled = false;
     return;
   }
 
+  outputs.sort((left, right) => left.index - right.index);
   renderApiProgress(states, "模型回答已收齐，正在计算归因概率……");
   const analysisResponse = await fetch("/api/analyze", {
     method: "POST",
@@ -729,6 +768,7 @@ byId("bank-select").addEventListener("change", (event) => selectBank(event.targe
 byId("regenerate").addEventListener("click", loadChallenges);
 byId("analyze").addEventListener("click", analyzeManual);
 byId("api-test-form").addEventListener("submit", testViaApi);
+byId("load-custom-models").addEventListener("click", loadCustomModels);
 byId("auto-enrollment").addEventListener("submit", enrollAutomatically);
 byId("show-create-bank").addEventListener("click", () => { byId("create-bank-form").hidden = !byId("create-bank-form").hidden; });
 byId("create-bank-form").addEventListener("submit", createBank);

@@ -13,17 +13,19 @@ python start.py
 
 ## GitHub Pages
 
-`static/index.html` 是不依赖后端的浏览器版本，支持手动测试，也支持直接填写 Base URL、API Key、模型名进行 API 自动测试；归因计算和指纹库读取都在浏览器本地完成。仓库附带的 GitHub Actions 会将 `static/` 部署到 GitHub Pages。
+`static/index.html` 是不依赖后端的浏览器版本，支持手动测试，也支持直接填写 Base URL、API Key 进行 API 自动测试。Base URL 可省略 `/v1`，可从渠道的 `/v1/models` 加载模型，并支持 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages；归因计算和指纹库读取都在浏览器本地完成。仓库附带的 GitHub Actions 会将 `static/` 部署到 GitHub Pages。
 
-API 自动测试的请求从浏览器直接发往所填地址，API Key 只保留在当前页面内存中，不会写入仓库或 GitHub Pages。目标接口必须允许浏览器跨域访问（CORS）；否则请改用本地 Flask 版本。
+API 自动测试的请求从浏览器直接发往所填地址，API Key 只保留在当前页面内存中，不会写入仓库或 GitHub Pages。目标接口必须允许浏览器跨域访问（CORS）；浏览器也不能覆盖 `User-Agent` 等受限请求头。需要绕过 CORS 或使用 Codex / Claude Code 请求头预设时，请改用本地 Flask 版本。
 
 ## 使用
 
 - **手动测试**：复制三条挑战，分别发送给同一个待测模型，再粘贴每次完整输出。
-- **API 自动测试**：选择服务提供方，填写所需信息。程序会自动尝试 OpenAI Chat Completions 与 Anthropic Messages 格式，以三份有效回答为目标完成归因。
+- **API 自动测试**：选择 API 类型，填写所需信息，也可直接加载渠道模型目录。默认最多尝试 6 次、同时发出 3 个请求，收齐 3 份有效回答即停止。
 - **指纹库管理**：可以新建指纹库，或通过 API 为现有指纹库添加模型指纹。
 
 自定义提供方需要填写 Base URL、API Key 和模型名。OrcaRouter 提供方不需要填写这些内容，见下节。
+
+三份有效回答是当前校准上限，而不是渠道请求次数上限：每份回答本身包含约 300 个整数，统一指纹库对 1、2、3 份回答分别做过概率校准。当前库的交叉验证准确率约为 95.5%、99.6%、100%；继续增加有效回答会参与分数平均，但仍套用三份回答的概率校准，因此默认不多测。最多尝试次数可以在 3–12 之间调整，用于容忍拒答、截断或临时接口错误。
 
 ### OrcaRouter 提供方
 
@@ -49,7 +51,7 @@ PKCE 换回的是长期有效的普通 API Key，不是 refresh token：程序�
 
 ```powershell
 python -m unittest discover -s tests -t .
-node --test tests/ui-orcarouter.test.mjs
+node --test tests/ui-orcarouter.test.mjs tests/ui-pages-api.test.mjs
 ```
 
 设置 `ORCAROUTER_API_KEY` 后，`tests/test_orcarouter_live.py` 会额外对 `https://api.orcarouter.ai/v1` 发起一次真实请求并核对实时模型目录；未设置时该文件自动跳过。界面证据不随仓库分发：`python tests/capture_gui_evidence.py` 会现场启动应用，用 Playwright 驱动真实界面，把截图、`manifest.json` 与 sha256 写入已被 `.gitignore` 忽略的 `orca-evidence/`。

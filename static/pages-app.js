@@ -1,6 +1,6 @@
 import { analyzeGlobalOutputs, parseNumbers } from "./fingerprint-core.js";
 import { generateChallenges } from "./challenge-browser.js";
-import { requestCompletion } from "./api-client.js";
+import { loadModels, requestCompletion } from "./api-client.js";
 
 const state = { bank: null, challenges: [] };
 const byId = (id) => document.getElementById(id);
@@ -122,13 +122,13 @@ async function analyze() {
 
 function renderApiProgress(states, status) {
   const valid = states.filter((value) => value === "done").length;
-  const attempted = states.filter((value) => ["done", "invalid", "error"].includes(value)).length;
+  const attempted = states.filter((value) => ["done", "unused", "invalid", "error"].includes(value)).length;
   byId("api-test-progress").hidden = false;
   byId("api-progress-status").textContent = status;
   byId("api-progress-count").textContent = `有效 ${valid}/3 · 已尝试 ${attempted}/${states.length}`;
   byId("api-progress-fill").style.width = `${(valid / 3) * 100}%`;
   byId("api-progress-steps").innerHTML = states.map((value, index) => {
-    const labels = { pending: "等待", working: "请求中", done: "有效", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
+    const labels = { pending: "等待", working: "请求中", done: "有效", unused: "未采用", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
     return `<span class="progress-step ${value}"><b>${index + 1}</b>挑战 ${index + 1} · ${labels[value]}</span>`;
   }).join("");
 }
@@ -139,7 +139,10 @@ async function testViaApi(event) {
   button.disabled = true;
   byId("result").hidden = true;
   setMessage("");
-  const challenges = generateChallenges(6);
+  const maxAttempts = Math.min(12, Math.max(3, Number(byId("test-attempts").value) || 6));
+  const concurrency = Math.min(6, Math.max(1, Number(byId("test-concurrency").value) || 3));
+  const target = 3;
+  const challenges = generateChallenges(maxAttempts);
   const states = challenges.map(() => "pending");
   const outputs = [];
   const errors = [];
@@ -153,38 +156,67 @@ async function testViaApi(event) {
   };
   renderApiProgress(states, "已生成独立挑战，准备调用模型");
 
-  for (let index = 0; index < challenges.length && outputs.length < 3; index += 1) {
-    states[index] = "working";
-    renderApiProgress(states, `正在进行第 ${index + 1} 次尝试，等待模型完整输出……`);
-    try {
-      const text = await requestCompletion({ ...configuration, prompt: challenges[index].prompt });
-      const parsedNumbers = parseNumbers(text).length;
-      const minimumNumbers = Math.max(80, Math.ceil(challenges[index].expected_count * 0.55));
-      if (parsedNumbers >= minimumNumbers) {
-        outputs.push({ text, expected_count: challenges[index].expected_count });
-        states[index] = "done";
-      } else {
-        errors.push(`尝试 ${index + 1}: 有效数字 ${parsedNumbers}/${minimumNumbers}`);
-        states[index] = "invalid";
+  let nextIndex = 0;
+  async function worker() {
+    while (outputs.length < target && nextIndex < challenges.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      states[index] = "working";
+      renderApiProgress(states, `并发 ${concurrency} · 当前已有 ${outputs.length}/${target} 份有效回答`);
+      try {
+        const text = await requestCompletion({ ...configuration, prompt: challenges[index].prompt });
+        const parsedNumbers = parseNumbers(text).length;
+        const minimumNumbers = Math.max(80, Math.ceil(challenges[index].expected_count * 0.55));
+        if (parsedNumbers >= minimumNumbers && outputs.length < target) {
+          outputs.push({ index, text, expected_count: challenges[index].expected_count });
+          states[index] = "done";
+        } else if (parsedNumbers >= minimumNumbers) {
+          states[index] = "unused";
+        } else {
+          errors.push(`尝试 ${index + 1}: 有效数字 ${parsedNumbers}/${minimumNumbers}`);
+          states[index] = "invalid";
+        }
+      } catch (error) {
+        errors.push(`尝试 ${index + 1}: ${error.message}`);
+        states[index] = "error";
       }
-    } catch (error) {
-      errors.push(`尝试 ${index + 1}: ${error.message}`);
-      states[index] = "error";
+      renderApiProgress(states, `当前已有 ${outputs.length}/${target} 份有效回答`);
     }
-    renderApiProgress(states, `当前已有 ${outputs.length}/3 份有效回答`);
   }
+  await Promise.all(Array.from({ length: Math.min(concurrency, challenges.length) }, () => worker()));
 
-  if (outputs.length === 3) states.forEach((value, index) => { if (value === "pending") states[index] = "skipped"; });
+  if (outputs.length === target) states.forEach((value, index) => { if (value === "pending") states[index] = "skipped"; });
   if (!outputs.length) {
-    renderApiProgress(states, "六次尝试后仍没有可用回答");
+    renderApiProgress(states, `${maxAttempts} 次尝试后仍没有可用回答`);
     setMessage(`没有获得可分析输出。${errors[0] || ""}`);
     button.disabled = false;
     return;
   }
-  renderApiProgress(states, `测试完成：${outputs.length}/3 份有效回答进入归因`);
+  outputs.sort((left, right) => left.index - right.index);
+  renderApiProgress(states, `测试完成：${outputs.length}/${target} 份有效回答进入归因`);
   renderResult(analyzeGlobalOutputs(outputs, state.bank));
   setMessage(errors.length ? `部分尝试未计入：${errors[0]}` : "", errors.length ? "error" : "success");
   button.disabled = false;
+}
+
+async function loadChannelModels() {
+  const button = byId("load-channel-models");
+  button.disabled = true;
+  setMessage("正在读取渠道模型目录……", "working");
+  try {
+    const models = await loadModels({
+      baseUrl: byId("test-api-base").value.trim(),
+      apiKey: byId("test-api-key").value,
+      apiFormat: byId("test-api-format").value,
+    });
+    byId("channel-model-options").innerHTML = models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
+    if (!models.includes(byId("test-api-model").value.trim())) byId("test-api-model").value = models[0];
+    setMessage(`已加载 ${models.length} 个模型，并选中 ${byId("test-api-model").value}。`, "success");
+  } catch (error) {
+    setMessage(error.message || "模型目录加载失败。", "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function initialize() {
@@ -206,5 +238,6 @@ async function initialize() {
 byId("regenerate").addEventListener("click", regenerate);
 byId("analyze").addEventListener("click", analyze);
 byId("api-test-form").addEventListener("submit", testViaApi);
+byId("load-channel-models").addEventListener("click", loadChannelModels);
 document.querySelectorAll("[data-test-mode]").forEach((button) => button.addEventListener("click", () => activateMode(button.dataset.testMode)));
 initialize();
