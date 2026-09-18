@@ -471,7 +471,7 @@ def test_automatic(
     header_preset: str = "default",
 ) -> dict:
     target_count = 3
-    max_attempts = 10
+    max_attempts = 8
     challenges = generate_challenges(max_attempts)
     outputs = []
     errors = []

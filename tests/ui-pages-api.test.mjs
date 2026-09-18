@@ -15,15 +15,21 @@ test("channel models use a native select instead of an unreliable datalist", asy
 });
 
 test("automatic testing has a fixed retry budget and updates every valid result", async () => {
-  const [html, app] = await Promise.all([
+  const [html, app, styles] = await Promise.all([
     readFile(new URL("../static/index.html", import.meta.url), "utf8"),
     readFile(new URL("../static/pages-app.js", import.meta.url), "utf8"),
+    readFile(new URL("../static/styles.css", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(html, /test-attempts|test-concurrency/);
-  assert.match(app, /const maxAttempts = 10;/);
+  assert.match(html, /已尝试 0\/3/);
+  assert.match(app, /const maxAttempts = 8;/);
   assert.match(app, /const concurrency = 3;/);
+  assert.match(app, /index < concurrency \? "pending" : "hidden"/);
+  assert.match(app, /states\.filter\(\(state\) => state !== "hidden"\)/);
   assert.match(app, /if \(shouldRetry\) await worker\(\);/);
   assert.match(app, /renderResult\(analyzeGlobalOutputs\(currentOutputs, state\.bank\)/);
+  assert.match(styles, /transition: flex-basis \.25s ease/);
+  assert.match(styles, /@keyframes progress-step-in/);
 });
 
 test("completion URL accepts a base URL or a complete endpoint", () => {
