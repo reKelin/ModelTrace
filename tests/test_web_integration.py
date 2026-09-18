@@ -132,6 +132,11 @@ class WebIntegrationCase(unittest.TestCase):
 
     # -- registry and credential surface ----------------------------------
 
+    def test_custom_channel_models_use_a_native_select(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn('id="custom-channel-model-select"', html)
+        self.assertNotIn('id="custom-channel-models"', html)
+
     def test_provider_registry_lists_both_orcarouter_entries(self):
         payload = self.client.get("/api/providers").get_json()
         ids = [provider["id"] for provider in payload["providers"]]

@@ -510,9 +510,14 @@ async function loadCustomModels() {
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "模型目录加载失败");
-    byId("custom-channel-models").innerHTML = payload.models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
-    if (!payload.models.includes(form.customModel.value.trim())) form.customModel.value = payload.models[0];
-    setMessage(byId("test-message"), `已加载 ${payload.models.length} 个模型，并选中 ${form.customModel.value}。`, "success");
+    const select = byId("custom-channel-model-select");
+    const selected = payload.models.includes(form.customModel.value.trim()) ? form.customModel.value.trim() : payload.models[0];
+    select.innerHTML = `${payload.models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}<option value="">手动填写…</option>`;
+    select.value = selected;
+    form.customModel.value = selected;
+    form.customModel.hidden = true;
+    select.hidden = false;
+    setMessage(byId("test-message"), `已加载 ${payload.models.length} 个模型，并选中 ${selected}。`, "success");
   } catch (error) {
     setMessage(byId("test-message"), error.message || "模型目录加载失败。", "error");
   } finally {
@@ -769,6 +774,15 @@ byId("regenerate").addEventListener("click", loadChallenges);
 byId("analyze").addEventListener("click", analyzeManual);
 byId("api-test-form").addEventListener("submit", testViaApi);
 byId("load-custom-models").addEventListener("click", loadCustomModels);
+byId("custom-channel-model-select").addEventListener("change", (event) => {
+  const form = state.providerForms.find((item) => item.root.id === "api-test-form");
+  if (event.target.value) form.customModel.value = event.target.value;
+  else {
+    event.target.hidden = true;
+    form.customModel.hidden = false;
+    form.customModel.focus();
+  }
+});
 byId("auto-enrollment").addEventListener("submit", enrollAutomatically);
 byId("show-create-bank").addEventListener("click", () => { byId("create-bank-form").hidden = !byId("create-bank-form").hidden; });
 byId("create-bank-form").addEventListener("submit", createBank);

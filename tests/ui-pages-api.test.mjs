@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { buildCompletionRequest, completionUrl, extractCompletion, loadModels, modelsUrl, requestCompletion } from "../static/api-client.js";
+
+test("channel models use a native select instead of an unreliable datalist", async () => {
+  const [html, app] = await Promise.all([
+    readFile(new URL("../static/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../static/pages-app.js", import.meta.url), "utf8"),
+  ]);
+  assert.match(html, /<select id="channel-model-select"/);
+  assert.doesNotMatch(html, /<datalist/);
+  assert.match(app, /byId\("channel-model-select"\)\.addEventListener\("change"/);
+});
 
 test("completion URL accepts a base URL or a complete endpoint", () => {
   assert.equal(completionUrl("https://example.test/v1", "openai"), "https://example.test/v1/chat/completions");

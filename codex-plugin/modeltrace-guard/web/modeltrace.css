@@ -104,7 +104,7 @@ textarea:focus, input:focus, .form-grid select:focus { border-color: #84adff; bo
 label small { color: var(--muted); font-weight: 400; line-height: 1.45; }
 label code { color: var(--primary-dark); }
 .input-action { display: flex; gap: 8px; }
-.input-action input { min-width: 0; flex: 1; }
+.input-action input, .input-action select { min-width: 0; flex: 1; }
 .input-action .button { flex: 0 0 auto; white-space: nowrap; }
 .form-footer { justify-content: flex-end; padding: 12px 17px; border-top: 1px solid var(--line); }
 
