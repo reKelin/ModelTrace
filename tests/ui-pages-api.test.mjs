@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildCompletionRequest, completionUrl, extractCompletion, requestCompletion } from "../static/api-client.js";
+import { buildCompletionRequest, completionUrl, extractCompletion, loadModels, modelsUrl, requestCompletion } from "../static/api-client.js";
 
 test("completion URL accepts a base URL or a complete endpoint", () => {
   assert.equal(completionUrl("https://example.test/v1", "openai"), "https://example.test/v1/chat/completions");
+  assert.equal(completionUrl("https://example.test", "openai-responses"), "https://example.test/v1/responses");
   assert.equal(completionUrl("https://example.test/v1/messages", "anthropic"), "https://example.test/v1/messages");
+  assert.equal(modelsUrl("https://example.test/v1/chat/completions"), "https://example.test/v1/models");
   assert.throws(() => completionUrl("http://example.test/v1", "openai"), /HTTPS/);
 });
 
@@ -25,7 +27,36 @@ test("OpenAI request sends the key only in the authorization header", () => {
 
 test("completion text is extracted from both supported formats", () => {
   assert.equal(extractCompletion({ choices: [{ message: { content: "openai" } }] }, "openai"), "openai");
+  assert.equal(extractCompletion({ output: [{ content: [{ type: "output_text", text: "responses" }] }] }, "openai-responses"), "responses");
   assert.equal(extractCompletion({ content: [{ type: "text", text: "anthropic" }] }, "anthropic"), "anthropic");
+});
+
+test("Responses requests use the Responses body shape", () => {
+  const request = buildCompletionRequest({
+    baseUrl: "https://example.test",
+    apiKey: "secret-key",
+    model: "model-a",
+    prompt: "prompt",
+    temperature: null,
+    apiFormat: "openai-responses",
+  });
+  assert.equal(request.url, "https://example.test/v1/responses");
+  assert.deepEqual(JSON.parse(request.options.body), { model: "model-a", input: "prompt", max_output_tokens: 4096 });
+});
+
+test("channel model discovery uses the normalized models endpoint", async () => {
+  let captured;
+  const models = await loadModels({
+    baseUrl: "https://example.test",
+    apiKey: "secret-key",
+    apiFormat: "openai",
+  }, async (url, options) => {
+    captured = { url, options };
+    return { ok: true, status: 200, json: async () => ({ data: [{ id: "z-model" }, { id: "a-model" }] }) };
+  });
+  assert.equal(captured.url, "https://example.test/v1/models");
+  assert.equal(captured.options.headers.Authorization, "Bearer secret-key");
+  assert.deepEqual(models, ["a-model", "z-model"]);
 });
 
 test("short-body gateways are retried once with semantics-neutral padding", async () => {

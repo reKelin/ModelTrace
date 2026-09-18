@@ -182,6 +182,23 @@ class WebIntegrationCase(unittest.TestCase):
             ).get_data(as_text=True)
         self.assertNotIn(FAKE_KEY, body)
 
+    def test_custom_channel_models_route_normalizes_url_and_applies_header_preset(self):
+        captured = []
+        with mock.patch("urllib.request.urlopen", fake_urlopen(captured=captured)):
+            response = self.client.post(
+                "/api/models",
+                json={
+                    "base_url": "https://channel.example",
+                    "api_key": "test-key",
+                    "api_format": "openai",
+                    "header_preset": "codex",
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(catalog_calls(captured), ["https://channel.example/v1/models"])
+        self.assertEqual(captured[0].headers["User-agent"], "OpenAI/JS 6.45.0")
+        self.assertEqual(response.get_json()["models"], ["vendor/embed", "vendor/painter", "vendor/text-only", "vendor/vision"])
+
     def test_multimodal_request_only_returns_models_declaring_image_input(self):
         with mock.patch("urllib.request.urlopen", fake_urlopen()):
             payload = self.client.post(
