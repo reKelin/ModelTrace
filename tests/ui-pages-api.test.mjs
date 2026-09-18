@@ -14,6 +14,18 @@ test("channel models use a native select instead of an unreliable datalist", asy
   assert.match(app, /byId\("channel-model-select"\)\.addEventListener\("change"/);
 });
 
+test("automatic testing has a fixed retry budget and updates every valid result", async () => {
+  const [html, app] = await Promise.all([
+    readFile(new URL("../static/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../static/pages-app.js", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(html, /test-attempts|test-concurrency/);
+  assert.match(app, /const maxAttempts = 10;/);
+  assert.match(app, /const concurrency = 3;/);
+  assert.match(app, /if \(shouldRetry\) await worker\(\);/);
+  assert.match(app, /renderResult\(analyzeGlobalOutputs\(currentOutputs, state\.bank\)/);
+});
+
 test("completion URL accepts a base URL or a complete endpoint", () => {
   assert.equal(completionUrl("https://example.test/v1", "openai"), "https://example.test/v1/chat/completions");
   assert.equal(completionUrl("https://example.test", "openai-responses"), "https://example.test/v1/responses");

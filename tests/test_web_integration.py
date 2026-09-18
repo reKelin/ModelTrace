@@ -136,6 +136,12 @@ class WebIntegrationCase(unittest.TestCase):
         html = self.client.get("/").get_data(as_text=True)
         self.assertIn('id="custom-channel-model-select"', html)
         self.assertNotIn('id="custom-channel-models"', html)
+        self.assertNotIn('id="test-attempts"', html)
+        self.assertNotIn('id="test-concurrency"', html)
+
+    def test_provider_bootstrap_survives_mixed_version_browser_assets(self):
+        script = (Path(__file__).resolve().parent.parent / "static" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('byId("custom-channel-model-select")?.addEventListener', script)
 
     def test_provider_registry_lists_both_orcarouter_entries(self):
         payload = self.client.get("/api/providers").get_json()
