@@ -209,9 +209,15 @@ async function loadChannelModels() {
       apiKey: byId("test-api-key").value,
       apiFormat: byId("test-api-format").value,
     });
-    byId("channel-model-options").innerHTML = models.map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
-    if (!models.includes(byId("test-api-model").value.trim())) byId("test-api-model").value = models[0];
-    setMessage(`已加载 ${models.length} 个模型，并选中 ${byId("test-api-model").value}。`, "success");
+    const input = byId("test-api-model");
+    const select = byId("channel-model-select");
+    const selected = models.includes(input.value.trim()) ? input.value.trim() : models[0];
+    select.innerHTML = `${models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}<option value="">手动填写…</option>`;
+    select.value = selected;
+    input.value = selected;
+    input.hidden = true;
+    select.hidden = false;
+    setMessage(`已加载 ${models.length} 个模型，并选中 ${selected}。`, "success");
   } catch (error) {
     setMessage(error.message || "模型目录加载失败。", "error");
   } finally {
@@ -239,5 +245,14 @@ byId("regenerate").addEventListener("click", regenerate);
 byId("analyze").addEventListener("click", analyze);
 byId("api-test-form").addEventListener("submit", testViaApi);
 byId("load-channel-models").addEventListener("click", loadChannelModels);
+byId("channel-model-select").addEventListener("change", (event) => {
+  const input = byId("test-api-model");
+  if (event.target.value) input.value = event.target.value;
+  else {
+    event.target.hidden = true;
+    input.hidden = false;
+    input.focus();
+  }
+});
 document.querySelectorAll("[data-test-mode]").forEach((button) => button.addEventListener("click", () => activateMode(button.dataset.testMode)));
 initialize();
