@@ -228,6 +228,7 @@ class CredentialStoreTests(TemporaryStore):
         self.assertIsNone(self.store.read())
         self.assertFalse(self.store.clear())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX permission bits are unavailable on Windows")
     def test_secret_file_is_not_world_readable(self):
         self.store.save(FAKE_KEY, source="pkce", account_id="42", scope="api")
         mode = os.stat(self.path).st_mode & 0o777

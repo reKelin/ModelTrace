@@ -13,7 +13,9 @@ python start.py
 
 ## GitHub Pages
 
-`static/index.html` 是不依赖后端的手动测试版本，归因计算和指纹库读取都在浏览器本地完成。仓库附带的 GitHub Actions 会将 `static/` 部署到 GitHub Pages。
+`static/index.html` 是不依赖后端的浏览器版本，支持手动测试，也支持直接填写 Base URL、API Key、模型名进行 API 自动测试；归因计算和指纹库读取都在浏览器本地完成。仓库附带的 GitHub Actions 会将 `static/` 部署到 GitHub Pages。
+
+API 自动测试的请求从浏览器直接发往所填地址，API Key 只保留在当前页面内存中，不会写入仓库或 GitHub Pages。目标接口必须允许浏览器跨域访问（CORS）；否则请改用本地 Flask 版本。
 
 ## 使用
 

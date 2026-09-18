@@ -1,5 +1,6 @@
-import { analyzeGlobalOutputs } from "./fingerprint-core.js";
+import { analyzeGlobalOutputs, parseNumbers } from "./fingerprint-core.js";
 import { generateChallenges } from "./challenge-browser.js";
+import { requestCompletion } from "./api-client.js";
 
 const state = { bank: null, challenges: [] };
 const byId = (id) => document.getElementById(id);
@@ -19,6 +20,11 @@ function setMessage(text, type = "error") {
   element.textContent = text;
   element.className = `message ${type}`;
   element.hidden = !text;
+}
+
+function activateMode(name) {
+  document.querySelectorAll("[data-test-mode]").forEach((item) => item.classList.toggle("active", item.dataset.testMode === name));
+  document.querySelectorAll(".mode-panel").forEach((item) => item.classList.toggle("active", item.id === `test-${name}`));
 }
 
 async function copyText(text, button) {
@@ -114,6 +120,73 @@ async function analyze() {
   }
 }
 
+function renderApiProgress(states, status) {
+  const valid = states.filter((value) => value === "done").length;
+  const attempted = states.filter((value) => ["done", "invalid", "error"].includes(value)).length;
+  byId("api-test-progress").hidden = false;
+  byId("api-progress-status").textContent = status;
+  byId("api-progress-count").textContent = `有效 ${valid}/3 · 已尝试 ${attempted}/${states.length}`;
+  byId("api-progress-fill").style.width = `${(valid / 3) * 100}%`;
+  byId("api-progress-steps").innerHTML = states.map((value, index) => {
+    const labels = { pending: "等待", working: "请求中", done: "有效", invalid: "数字不足", error: "接口失败", skipped: "无需调用" };
+    return `<span class="progress-step ${value}"><b>${index + 1}</b>挑战 ${index + 1} · ${labels[value]}</span>`;
+  }).join("");
+}
+
+async function testViaApi(event) {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button[type=submit]");
+  button.disabled = true;
+  byId("result").hidden = true;
+  setMessage("");
+  const challenges = generateChallenges(6);
+  const states = challenges.map(() => "pending");
+  const outputs = [];
+  const errors = [];
+  const temperatureValue = byId("test-temperature").value.trim();
+  const configuration = {
+    baseUrl: byId("test-api-base").value.trim(),
+    apiKey: byId("test-api-key").value,
+    model: byId("test-api-model").value.trim(),
+    apiFormat: byId("test-api-format").value,
+    temperature: temperatureValue === "" ? null : Number(temperatureValue),
+  };
+  renderApiProgress(states, "已生成独立挑战，准备调用模型");
+
+  for (let index = 0; index < challenges.length && outputs.length < 3; index += 1) {
+    states[index] = "working";
+    renderApiProgress(states, `正在进行第 ${index + 1} 次尝试，等待模型完整输出……`);
+    try {
+      const text = await requestCompletion({ ...configuration, prompt: challenges[index].prompt });
+      const parsedNumbers = parseNumbers(text).length;
+      const minimumNumbers = Math.max(80, Math.ceil(challenges[index].expected_count * 0.55));
+      if (parsedNumbers >= minimumNumbers) {
+        outputs.push({ text, expected_count: challenges[index].expected_count });
+        states[index] = "done";
+      } else {
+        errors.push(`尝试 ${index + 1}: 有效数字 ${parsedNumbers}/${minimumNumbers}`);
+        states[index] = "invalid";
+      }
+    } catch (error) {
+      errors.push(`尝试 ${index + 1}: ${error.message}`);
+      states[index] = "error";
+    }
+    renderApiProgress(states, `当前已有 ${outputs.length}/3 份有效回答`);
+  }
+
+  if (outputs.length === 3) states.forEach((value, index) => { if (value === "pending") states[index] = "skipped"; });
+  if (!outputs.length) {
+    renderApiProgress(states, "六次尝试后仍没有可用回答");
+    setMessage(`没有获得可分析输出。${errors[0] || ""}`);
+    button.disabled = false;
+    return;
+  }
+  renderApiProgress(states, `测试完成：${outputs.length}/3 份有效回答进入归因`);
+  renderResult(analyzeGlobalOutputs(outputs, state.bank));
+  setMessage(errors.length ? `部分尝试未计入：${errors[0]}` : "", errors.length ? "error" : "success");
+  button.disabled = false;
+}
+
 async function initialize() {
   try {
     const response = await fetch("./data/unified_bank.json", { cache: "no-cache" });
@@ -132,4 +205,6 @@ async function initialize() {
 
 byId("regenerate").addEventListener("click", regenerate);
 byId("analyze").addEventListener("click", analyze);
+byId("api-test-form").addEventListener("submit", testViaApi);
+document.querySelectorAll("[data-test-mode]").forEach((button) => button.addEventListener("click", () => activateMode(button.dataset.testMode)));
 initialize();
