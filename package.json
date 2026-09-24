@@ -1,0 +1,11 @@
+{
+  "name": "modeltrace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:pages-guard": "node --test tests/pages-guard.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
