@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { buildCompletionRequest, completionUrl, extractCompletion, loadModels, modelsUrl, requestCompletion } from "../static/api-client.js";
+
+test("Pages changes the entry script URL when its contents change", async () => {
+  const html = await readFile(new URL("../static/index.html", import.meta.url), "utf8");
+  const script = await readFile(new URL("../static/pages-app.js", import.meta.url), "utf8");
+  const version = createHash("sha256").update(script.replace(/\r\n/g, "\n")).digest("hex").slice(0, 16);
+  assert.ok(html.includes(`src="./pages-app.js?v=${version}"`));
+});
 
 test("both entry points include the shared API form and Pages explains local-only options", async () => {
   const [local, pages, html] = await Promise.all([
