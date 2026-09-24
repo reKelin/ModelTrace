@@ -2,8 +2,56 @@ import { analyzeGlobalOutputs, parseNumbers } from "./fingerprint-core.js";
 import { generateChallenges } from "./challenge-browser.js";
 import { loadModels, requestCompletion } from "./api-client.js";
 
-const state = { bank: null, challenges: [] };
+const state = { bank: null, challenges: [], catalogGeneration: 0, orcaModels: [] };
 const byId = (id) => document.getElementById(id);
+
+const isOrca = () => byId("test-provider").value === "orcarouter";
+
+function configuration() {
+  const temperature = byId("test-temperature").value.trim();
+  return {
+    provider: byId("test-provider").value,
+    baseUrl: isOrca() ? "https://api.orcarouter.ai/v1" : byId("test-api-base").value.trim(),
+    apiKey: byId("test-api-key").value.trim(),
+    model: byId("test-api-model").value.trim(),
+    apiFormat: byId("test-api-format").value,
+    temperature: temperature === "" ? null : Number(temperature),
+  };
+}
+
+function resetCatalog() {
+  state.catalogGeneration += 1;
+  state.orcaModels = [];
+  const input = byId("test-api-model");
+  const select = byId("custom-channel-model-select");
+  input.value = "";
+  input.hidden = isOrca();
+  input.disabled = isOrca();
+  select.innerHTML = '<option value="">请先加载模型</option>';
+  select.hidden = !isOrca();
+  select.disabled = !isOrca();
+  select.required = isOrca();
+  byId("load-custom-models").disabled = false;
+}
+
+function applyProvider() {
+  // Credentials must never follow a provider switch to a different endpoint.
+  byId("test-api-key").value = "";
+  byId("test-api-base").value = isOrca() ? "https://api.orcarouter.ai/v1" : "";
+  byId("test-api-base").readOnly = isOrca();
+  byId("provider-help").textContent = isOrca()
+    ? "填写 OrcaRouter API Key 后加载模型；仅列出支持所选 API 类型的模型。密钥不保存，账户授权请用本地版。"
+    : "Key 只在当前页面内存中使用。接口须允许浏览器跨域访问（CORS）。";
+  resetCatalog();
+  setMessage("");
+}
+
+function setApiBusy(busy) {
+  byId("api-test-form").querySelectorAll("input, select, button").forEach((element) => {
+    element.disabled = busy || element.hidden;
+  });
+  byId("api-test-form").querySelector("button[type=submit]").disabled = busy || !state.bank;
+}
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (character) => ({
@@ -148,8 +196,12 @@ function renderApiProgress(states, status) {
 
 async function testViaApi(event) {
   event.preventDefault();
-  const button = event.currentTarget.querySelector("button[type=submit]");
-  button.disabled = true;
+  if (!state.bank) return setMessage("指纹库尚未加载，请稍后再试。");
+  const config = configuration();
+  if (isOrca() && !state.orcaModels.includes(config.model)) {
+    return setMessage("请先加载 OrcaRouter 模型目录并选择模型。");
+  }
+  setApiBusy(true);
   byId("result").hidden = true;
   setMessage("");
   const maxAttempts = 6;
@@ -159,14 +211,6 @@ async function testViaApi(event) {
   const states = challenges.map((_, index) => index < concurrency ? "pending" : "hidden");
   const outputs = [];
   const errors = [];
-  const temperatureValue = byId("test-temperature").value.trim();
-  const configuration = {
-    baseUrl: byId("test-api-base").value.trim(),
-    apiKey: byId("test-api-key").value,
-    model: byId("test-api-model").value.trim(),
-    apiFormat: byId("test-api-format").value,
-    temperature: temperatureValue === "" ? null : Number(temperatureValue),
-  };
   renderApiProgress(states, "已生成独立挑战，准备调用模型");
 
   let nextIndex = 0;
@@ -178,7 +222,7 @@ async function testViaApi(event) {
     states[index] = "working";
     renderApiProgress(states, `并发 ${concurrency} · 当前已有 ${outputs.length}/${target} 份有效回答`);
     try {
-      const text = await requestCompletion({ ...configuration, prompt: challenges[index].prompt });
+      const text = await requestCompletion({ ...config, prompt: challenges[index].prompt });
       const parsedNumbers = parseNumbers(text).length;
       const minimumNumbers = Math.max(80, Math.ceil(challenges[index].expected_count * 0.55));
       if (parsedNumbers >= minimumNumbers && outputs.length < target) {
@@ -207,37 +251,43 @@ async function testViaApi(event) {
   if (!outputs.length) {
     renderApiProgress(states, `${maxAttempts} 次尝试后仍没有可用回答`);
     setMessage(`没有获得可分析输出。${errors[0] || ""}`);
-    button.disabled = false;
+    setApiBusy(false);
     return;
   }
   renderApiProgress(states, `测试完成：${outputs.length}/${target} 份有效回答进入归因`);
   setMessage(errors.length ? `部分尝试未计入：${errors[0]}` : "", errors.length ? "error" : "success");
-  button.disabled = false;
+  setApiBusy(false);
 }
 
 async function loadChannelModels() {
-  const button = byId("load-channel-models");
+  if (!byId("test-api-base").reportValidity() || !byId("test-api-key").reportValidity()) return;
+  const config = configuration();
+  const selectedModel = byId("test-api-model").value.trim();
+  resetCatalog();
+  const generation = state.catalogGeneration;
+  const button = byId("load-custom-models");
   button.disabled = true;
   setMessage("正在读取渠道模型目录……", "working");
   try {
-    const models = await loadModels({
-      baseUrl: byId("test-api-base").value.trim(),
-      apiKey: byId("test-api-key").value,
-      apiFormat: byId("test-api-format").value,
-    });
+    const models = await loadModels(config);
+    if (generation !== state.catalogGeneration) return;
     const input = byId("test-api-model");
-    const select = byId("channel-model-select");
-    const selected = models.includes(input.value.trim()) ? input.value.trim() : models[0];
-    select.innerHTML = `${models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}<option value="">手动填写…</option>`;
+    const select = byId("custom-channel-model-select");
+    const selected = models.includes(selectedModel) ? selectedModel : models[0];
+    state.orcaModels = isOrca() ? models : [];
+    select.innerHTML = `${models.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")}${isOrca() ? "" : '<option value="">手动填写…</option>'}`;
     select.value = selected;
     input.value = selected;
     input.hidden = true;
+    input.disabled = true;
     select.hidden = false;
+    select.disabled = false;
     setMessage(`已加载 ${models.length} 个模型，并选中 ${selected}。`, "success");
   } catch (error) {
+    if (generation !== state.catalogGeneration) return;
     setMessage(error.message || "模型目录加载失败。", "error");
   } finally {
-    button.disabled = false;
+    if (generation === state.catalogGeneration) button.disabled = false;
   }
 }
 
@@ -252,6 +302,7 @@ async function initialize() {
     byId("regenerate").disabled = false;
     byId("analyze").disabled = false;
     regenerate();
+    setApiBusy(false);
   } catch (error) {
     setMessage(`${error.message}。请通过 HTTP 服务或 GitHub Pages 打开本页面。`, "error");
   }
@@ -260,15 +311,23 @@ async function initialize() {
 byId("regenerate").addEventListener("click", regenerate);
 byId("analyze").addEventListener("click", analyze);
 byId("api-test-form").addEventListener("submit", testViaApi);
-byId("load-channel-models").addEventListener("click", loadChannelModels);
-byId("channel-model-select").addEventListener("change", (event) => {
+byId("load-custom-models").addEventListener("click", loadChannelModels);
+byId("test-provider").addEventListener("change", applyProvider);
+["test-api-base", "test-api-key", "test-api-format"].forEach((id) => {
+  byId(id).addEventListener("input", resetCatalog);
+});
+byId("custom-channel-model-select").addEventListener("change", (event) => {
   const input = byId("test-api-model");
   if (event.target.value) input.value = event.target.value;
   else {
     event.target.hidden = true;
+    event.target.disabled = true;
     input.hidden = false;
+    input.disabled = false;
+    input.value = "";
     input.focus();
   }
 });
 document.querySelectorAll("[data-test-mode]").forEach((button) => button.addEventListener("click", () => activateMode(button.dataset.testMode)));
+resetCatalog();
 initialize();

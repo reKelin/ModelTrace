@@ -23,13 +23,14 @@ function apiRootUrl(baseUrl) {
   return url;
 }
 
-function requestHeaders(apiKey, apiFormat) {
+function requestHeaders(apiKey, apiFormat, provider) {
   if (apiFormat === "anthropic") {
     return {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
       "Content-Type": "application/json",
+      ...(provider === "orcarouter" ? { Authorization: `Bearer ${apiKey}` } : {}),
     };
   }
   return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
@@ -48,7 +49,7 @@ export function modelsUrl(baseUrl) {
   return url.toString();
 }
 
-export function buildCompletionRequest({ baseUrl, apiKey, model, prompt, temperature, apiFormat }) {
+export function buildCompletionRequest({ baseUrl, apiKey, model, prompt, temperature, apiFormat, provider }) {
   const anthropic = apiFormat === "anthropic";
   const responses = apiFormat === "openai-responses";
   const body = anthropic
@@ -61,7 +62,7 @@ export function buildCompletionRequest({ baseUrl, apiKey, model, prompt, tempera
     url: completionUrl(baseUrl, apiFormat),
     options: {
       method: "POST",
-      headers: requestHeaders(apiKey, apiFormat),
+      headers: requestHeaders(apiKey, apiFormat, provider),
       body: JSON.stringify(body),
     },
   };
@@ -108,7 +109,7 @@ export async function loadModels(configuration, fetchImpl = fetch) {
   const url = modelsUrl(configuration.baseUrl);
   let response;
   try {
-    response = await fetchImpl(url, { headers: requestHeaders(configuration.apiKey, configuration.apiFormat) });
+    response = await fetchImpl(url, { headers: requestHeaders(configuration.apiKey, configuration.apiFormat, configuration.provider) });
   } catch {
     throw new Error(`浏览器无法读取 ${new URL(url).host} 的模型目录；请检查 CORS，或改用本地版`);
   }
@@ -120,6 +121,10 @@ export async function loadModels(configuration, fetchImpl = fetch) {
   }
   if (!response.ok) throw new Error(upstreamError(payload, response.status));
   const models = (Array.isArray(payload.data) ? payload.data : Array.isArray(payload.models) ? payload.models : [])
+    .filter((item) => configuration.provider !== "orcarouter" || (
+      Array.isArray(item?.supported_endpoint_types)
+      && item.supported_endpoint_types.includes(configuration.apiFormat === "openai-responses" ? "openai-response" : configuration.apiFormat)
+    ))
     .map((item) => typeof item === "string" ? item : item?.id)
     .filter(Boolean);
   if (!models.length) throw new Error("接口没有返回可选模型");

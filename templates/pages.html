@@ -42,25 +42,7 @@
       </section>
 
       <section id="test-api" class="mode-panel">
-
-<form id="api-test-form" class="form-panel">
-  <div class="form-grid two">
-    <label><span>服务提供方</span><select id="test-provider" data-orca-provider><option value="custom">自定义提供方</option><option value="orcarouter">OrcaRouter - API</option><option value="orcarouter-oauth" disabled>OrcaRouter - Auth（需本地版）</option></select></label>
-    <div class="form-field" data-model-field="custom"><span>接口模型名</span><span class="input-action"><input id="test-api-model" placeholder="先加载或手动填写" autocomplete="off" required><select id="custom-channel-model-select" aria-label="渠道模型" hidden></select><button id="load-custom-models" class="button secondary" type="button">加载模型</button></span></div>
-
-    <label data-provider-field="base_url"><span>Base URL</span><input id="test-api-base" placeholder="https://example.com" type="url" required><small>可省略 /v1，系统会自动补全。</small></label>
-    <label data-provider-field="api_key"><span>API Key</span><input id="test-api-key" type="password" autocomplete="off" required></label>
-    <label><span>API 类型</span><select id="test-api-format"><option value="openai">OpenAI Chat Completions</option><option value="openai-responses">OpenAI Responses</option><option value="anthropic">Anthropic Messages</option></select></label>
-    <label><span>请求头预设</span><select id="test-header-preset"><option value="default">浏览器默认</option><option value="codex" disabled>Codex / OpenAI SDK（需本地版）</option><option value="claude-code" disabled>Claude Code / Anthropic SDK（需本地版）</option></select></label>
-    <label><span>温度（可选）</span><input id="test-temperature" type="number" min="0" max="2" step="0.1" placeholder="接口默认"></label>
-  </div>
-
-  <p id="provider-help" class="browser-note">Key 只在当前页面内存中使用。接口须允许浏览器跨域访问（CORS）。</p>
-  <details class="browser-note"><summary>网页版与本地版的功能差异</summary><p>网页版支持自定义接口、OrcaRouter API Key、模型目录、三种 API 格式及实时归因。OrcaRouter 账户授权、完整请求头预设、绕过 CORS 和指纹库管理需要运行 <code>python start.py</code>。网页版不会保存密钥，也不会伪装 SDK 的 User-Agent。</p></details>
-
-  <div class="form-footer"><span>首批并发 3 次；每次失败增加 1 次补试，累计最多 6 次。每份有效回答返回后立即更新结果。</span><button class="button primary" type="submit" data-orca-submit disabled>开始测试</button></div>
-</form>
-
+        {% include "api-test-form.html" %}
         <section id="api-test-progress" class="progress-panel" hidden aria-live="polite">
           <div class="progress-heading"><strong id="api-progress-status">准备测试</strong><span id="api-progress-count">有效 0/3 · 已尝试 0/3</span></div>
           <div class="progress-track"><i id="api-progress-fill"></i></div>

@@ -15,7 +15,11 @@ python start.py
 
 `static/index.html` 是不依赖后端的浏览器版本，支持手动测试，也支持直接填写 Base URL、API Key 进行 API 自动测试。Base URL 可省略 `/v1`，可从渠道的 `/v1/models` 加载模型，并支持 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages；归因计算和指纹库读取都在浏览器本地完成。仓库附带的 GitHub Actions 会将 `static/` 部署到 GitHub Pages。
 
-API 自动测试的请求从浏览器直接发往所填地址，API Key 只保留在当前页面内存中，不会写入仓库或 GitHub Pages。目标接口必须允许浏览器跨域访问（CORS）；浏览器也不能覆盖 `User-Agent` 等受限请求头。需要绕过 CORS 或使用 Codex / Claude Code 请求头预设时，请改用本地 Flask 版本。
+API 自动测试的请求从浏览器直接发往所填地址，API Key 只保留在当前页面内存中，不会写入仓库或 GitHub Pages。网页版和本地版共用 `templates/api-test-form.html`，支持相同的自定义接口字段、模型目录、三种 API 格式和实时归因；网页版也支持 OrcaRouter API Key，目录按所选 API 类型筛选，不能手填未经目录确认的 OrcaRouter 模型。
+
+目标接口必须允许浏览器跨域访问（CORS）；浏览器不能完整模拟 SDK 请求头。OrcaRouter 账户授权、完整 Codex / Claude Code 请求头预设、绕过 CORS 和指纹库管理需要本地 Flask 服务，网页版明确标出限制。切换服务提供方会清空 Key 和模型选择，避免把凭据带到其他地址。
+
+修改公共 API 表单或 `templates/pages.html` 后运行 `python tools/build_pages.py`，同步生成 `static/index.html`。Pages CI 用 `python tools/build_pages.py --check` 检查生成文件，PR 只做检查，合入 `main` 后才部署，避免两端表单继续漂移。
 
 ## 使用
 
