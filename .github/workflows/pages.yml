@@ -3,6 +3,8 @@ name: Deploy static ModelTrace to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
+    paths: ['templates/**', 'static/**', 'tools/build_pages.py', 'tests/ui-pages-api.test.mjs', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -11,11 +13,30 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install 'Jinja2>=3.1,<4'
+      - name: Check shared API form and generated Pages entry
+        run: python tools/build_pages.py --check
+      - name: Test browser API client
+        run: node --test tests/ui-pages-api.test.mjs
   deploy:
+    needs: check
+    if: github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -25,12 +46,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
-      - name: Test browser API client
-        run: node --test tests/ui-pages-api.test.mjs
       - name: Assemble static site
         run: |
           mkdir -p _site/data
-          cp static/index.html static/styles.css static/repository-link.css static/pages-app.js static/api-client.js static/fingerprint-core.js static/challenge-browser.js static/.nojekyll _site/
+          cp static/index.html static/styles.css static/api-test-form.css static/repository-link.css static/pages-app.js static/api-client.js static/fingerprint-core.js static/challenge-browser.js static/.nojekyll _site/
           cp data/unified_bank.json _site/data/unified_bank.json
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3

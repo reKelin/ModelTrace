@@ -4,14 +4,52 @@ import test from "node:test";
 
 import { buildCompletionRequest, completionUrl, extractCompletion, loadModels, modelsUrl, requestCompletion } from "../static/api-client.js";
 
+test("both entry points include the shared API form and Pages explains local-only options", async () => {
+  const [local, pages, html] = await Promise.all([
+    readFile(new URL("../templates/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../templates/pages.html", import.meta.url), "utf8"),
+    readFile(new URL("../static/index.html", import.meta.url), "utf8"),
+  ]);
+  for (const source of [local, pages]) assert.match(source, /include "api-test-form.html"/);
+  assert.match(html, /value="orcarouter">OrcaRouter - API/);
+  assert.match(html, /value="orcarouter-oauth" disabled/);
+  assert.match(html, /value="codex" disabled/);
+  assert.match(html, /value="claude-code" disabled/);
+  assert.match(html, /指纹库管理需要运行/);
+});
+
+test("OrcaRouter catalog only offers models that support the selected wire format", async () => {
+  const catalog = [
+    { id: "chat", supported_endpoint_types: ["openai"] },
+    { id: "responses", supported_endpoint_types: ["openai-response"] },
+    { id: "claude", supported_endpoint_types: ["anthropic"] },
+    { id: "image", supported_endpoint_types: ["image-generation"] },
+    { id: "unknown" },
+  ];
+  for (const [format, expected] of [["openai", "chat"], ["openai-responses", "responses"], ["anthropic", "claude"]]) {
+    const models = await loadModels({
+      baseUrl: "https://api.orcarouter.ai/v1", apiKey: "fixture", provider: "orcarouter", apiFormat: format,
+    }, async (_url, options) => {
+      assert.equal(options.headers.Authorization, "Bearer fixture");
+      return { ok: true, json: async () => ({ data: catalog }) };
+    });
+    assert.deepEqual(models, [expected]);
+    const request = buildCompletionRequest({
+      baseUrl: "https://api.orcarouter.ai/v1", apiKey: "fixture", provider: "orcarouter",
+      apiFormat: format, model: expected, prompt: "fixture", temperature: null,
+    });
+    assert.equal(request.options.headers.Authorization, "Bearer fixture");
+  }
+});
+
 test("channel models use a native select instead of an unreliable datalist", async () => {
   const [html, app] = await Promise.all([
     readFile(new URL("../static/index.html", import.meta.url), "utf8"),
     readFile(new URL("../static/pages-app.js", import.meta.url), "utf8"),
   ]);
-  assert.match(html, /<select id="channel-model-select"/);
+  assert.match(html, /<select id="custom-channel-model-select"/);
   assert.doesNotMatch(html, /<datalist/);
-  assert.match(app, /byId\("channel-model-select"\)\.addEventListener\("change"/);
+  assert.match(app, /byId\("custom-channel-model-select"\)\.addEventListener\("change"/);
 });
 
 test("automatic testing has a fixed retry budget and updates every valid result", async () => {

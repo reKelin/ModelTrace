@@ -1,0 +1,5 @@
+.browser-note { margin: 0 17px 14px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.browser-note summary { cursor: pointer; }
+.browser-note p { margin: 8px 0 0; }
+#api-test-form [hidden] { display: none; }
+#api-test-form .input-action .button { width: auto; }
