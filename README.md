@@ -104,6 +104,21 @@ templates/          页面模板
 tests/              OrcaRouter 提供方与 Web 接口测试
 ```
 
+## Pages Guard tests
+
+`ModelTrace Guard tests` 中的 `pages-guard` 检查会在页面、模板、指纹库或相关测试修改时运行。它使用真实 Chromium 检查页面初始化、旧脚本缓存隔离、指纹库缺失或 JSON 损坏时的错误提示，以及 API 提供方切换和模型列表加载。接口请求使用模拟数据，不需要真实 API Key。
+
+本地运行：
+
+```bash
+python tools/build_pages.py --check
+npm ci
+npx playwright install chromium
+npm run test:pages-guard
+```
+
+Linux 首次运行时可用 `npx playwright install --with-deps chromium` 安装浏览器系统依赖。
+
 ## 指纹库说明
 
 项目中现有指纹库共包含两个模型家族、16 个模型：
