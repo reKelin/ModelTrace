@@ -1,6 +1,7 @@
 """Render the Pages entry point using the same API form as Flask."""
 from pathlib import Path
 import argparse
+from hashlib import sha256
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
@@ -14,7 +15,12 @@ def render() -> str:
         undefined=StrictUndefined,
         keep_trailing_newline=True,
     )
-    rendered = environment.get_template("pages.html").render(static_mode=True)
+    # Normalize line endings so Windows and Linux builds use the same cache key.
+    script = (ROOT / "static" / "pages-app.js").read_text(encoding="utf-8")
+    script_version = sha256(script.encode("utf-8")).hexdigest()[:16]
+    rendered = environment.get_template("pages.html").render(
+        static_mode=True, script_version=script_version
+    )
     return "\n".join(line.rstrip() for line in rendered.splitlines()) + "\n"
 
 
