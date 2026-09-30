@@ -50,7 +50,7 @@ test('HTTP changes only cache-session scope, preserving compressed bytes and dis
   assert.equal(result.status, 200); assert.equal(result.body.toString(), 'data: fixture\n\n');
 });
 
-test('WebSocket handshakes and binary frames pass through byte-for-byte without emulation', async t => {
+test('WebSocket handshakes accept per-connection session IDs and preserve binary frames', async t => {
   const f = await fixture(t), fromNative = Buffer.from([0xc1, 0x82, 1, 2, 3, 4, 0x51, 0x53]);
   const fromServer = Buffer.from([0xc1, 2, 0x31, 0x32]);
   f.upstream.on('upgrade', (req, socket, head) => {
@@ -69,7 +69,7 @@ test('WebSocket handshakes and binary frames pass through byte-for-byte without 
     let chunks = Buffer.alloc(0);
     socket.setTimeout(5000, () => socket.destroy(new Error('Fixture socket timed out')));
     socket.on('error', reject);
-    socket.on('connect', () => socket.write(Buffer.concat([Buffer.from(`GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\nAuthorization: ${f.headers.authorization}\r\nSession-Id: ${f.childId}\r\nThread-Id: ${f.childId}\r\n\r\n`), fromNative])));
+    socket.on('connect', () => socket.write(Buffer.concat([Buffer.from(`GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate\r\nAuthorization: ${f.headers.authorization}\r\nSession-Id: ${randomUUID()}\r\nThread-Id: ${f.childId}\r\n\r\n`), fromNative])));
     socket.on('data', part => { chunks = Buffer.concat([chunks, part]); const end = chunks.indexOf('\r\n\r\n'); if (end >= 0 && chunks.length >= end + 4 + fromServer.length) { socket.destroy(); resolve(chunks); } });
   });
   const split = data.indexOf('\r\n\r\n');
@@ -85,13 +85,22 @@ test('only authorized disposable threads can send model requests; originals and 
   for (const [url, headers, method] of [
     [f.relay.url + '/responses', { ...f.headers, 'thread-id': f.sourceId }, 'POST'],
     [f.relay.url + '/responses', { ...f.headers, 'thread-id': randomUUID() }, 'POST'],
-    [f.relay.url + '/responses', { ...f.headers, 'session-id': randomUUID() }, 'POST'],
+    [f.relay.url + '/responses', { ...f.headers, 'session-id': 'not-a-uuid' }, 'POST'],
     [f.relay.url + '/responses', { 'thread-id': f.childId, 'session-id': f.childId }, 'POST'],
     [f.relay.url + '/responses', f.headers, 'GET'],
     [f.relay.url + '/arbitrary', f.headers, 'POST'],
     [new URL('/wrong/responses', f.relay.url).href, f.headers, 'POST'],
   ]) assert.equal((await request(url, { method, headers, ...(method === 'POST' ? { body: 'not forwarded' } : {}) })).status, 404);
   assert.equal(f.received.length, 0);
+});
+
+test('accepts the per-connection session-id UUID sent by newer Codex builds', async t => {
+  const f = await fixture(t, (req, res) => res.end('ok'));
+  const result = await request(f.relay.url + '/responses', { method: 'POST', headers: { ...f.headers, 'session-id': randomUUID() }, body: 'not forwarded' });
+  assert.equal(result.status, 200);
+  assert.equal(f.received.length, 1);
+  assert.equal(f.received[0].headers['session-id'], f.sessionId);
+  assert.equal(f.received[0].headers['thread-id'], f.childId);
 });
 
 test('model catalogue reads retain native query parameters and do not inject thread headers', async t => {
